@@ -294,20 +294,14 @@ body {
   outline: none;
 }
 
-.subtask-badge {
+.note-detail-badge {
   position: absolute;
-  top: 8px; right: 8px;
-  font-family: var(--ui);
-  font-size: 11px;
-  font-weight: 700;
-  color: #4b5563;
-  background: rgba(255,255,255,0.6);
-  border: 1px solid rgba(0,0,0,0.08);
-  border-radius: 999px;
-  padding: 1px 7px;
-  cursor: pointer;
+  top: 7px; right: 8px;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.6;
+  pointer-events: none;
 }
-.subtask-badge:hover { background: #fff; }
 
 .note-actions {
   position: absolute;
@@ -404,6 +398,27 @@ body {
   text-transform: uppercase; letter-spacing: 0.04em; color: #6b6357;
 }
 .modal-swatches { display: flex; gap: 8px; }
+.modal-row-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin: 18px 0 4px;
+}
+.modal-details {
+  width: 100%;
+  min-height: 120px;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.5);
+  padding: 10px 12px;
+  resize: vertical;
+  font-family: var(--ui);
+  font-size: 15px;
+  line-height: 1.45;
+  color: #36342b;
+  outline: none;
+}
+.modal-details:focus { border-color: rgba(0,0,0,0.28); background: rgba(255,255,255,0.7); }
 .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
 .modal-hint {
   font-family: var(--ui); font-size: 12px; color: rgba(0,0,0,0.45);
