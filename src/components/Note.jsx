@@ -6,10 +6,8 @@ export default function Note({
   left,
   top,
   dragging,
-  subTaskCount,
   onBeginDrag,
   onSetColor,
-  onOpenSubBoard,
   onToss,
 }) {
   const [showColors, setShowColors] = useState(false)
@@ -30,9 +28,7 @@ export default function Note({
   // action buttons or the color popover.
   const onPointerDown = (e) => {
     if (e.button != null && e.button !== 0) return
-    if (e.target.closest('.note-actions') || e.target.closest('.subtask-badge')) {
-      return
-    }
+    if (e.target.closest('.note-actions')) return
     onBeginDrag(e)
   }
 
@@ -54,17 +50,10 @@ export default function Note({
         {note.text || <span className="note-placeholder">Empty note — tap to edit</span>}
       </div>
 
-      {subTaskCount > 0 && (
-        <button
-          className="subtask-badge"
-          title="Open sub-board"
-          onClick={(e) => {
-            e.stopPropagation()
-            onOpenSubBoard()
-          }}
-        >
-          ☰ {subTaskCount}
-        </button>
+      {note.details?.trim() && (
+        <span className="note-detail-badge" title="Has notes — tap to open" aria-hidden>
+          📝
+        </span>
       )}
 
       <div className="note-actions">
@@ -97,17 +86,6 @@ export default function Note({
             </div>
           )}
         </div>
-
-        <button
-          className="action-btn"
-          title="Open sub-board"
-          onClick={(e) => {
-            e.stopPropagation()
-            onOpenSubBoard()
-          }}
-        >
-          ⤢
-        </button>
 
         <button
           className="action-btn action-trash"

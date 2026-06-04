@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  collectBoardIds,
   defaultData,
   loadData,
-  makeBoard,
   makeNote,
   saveData,
   uid,
@@ -99,27 +97,15 @@ export default function App() {
     [currentBoardId, updateBoard],
   )
 
-  // Actually remove a note (and any sub-boards it owns) from the data.
+  // Actually remove a note from the data.
   const removeNote = useCallback(
     (boardId, noteId) => {
-      setData((prev) => {
-        const board = prev.boards[boardId]
-        if (!board) return prev
-        const note = board.notes.find((n) => n.id === noteId)
-        const boards = { ...prev.boards }
-        if (note?.subBoardId) {
-          for (const id of collectBoardIds(boards, note.subBoardId)) {
-            delete boards[id]
-          }
-        }
-        boards[boardId] = {
-          ...board,
-          notes: board.notes.filter((n) => n.id !== noteId),
-        }
-        return { ...prev, boards }
-      })
+      updateBoard(boardId, (b) => ({
+        ...b,
+        notes: b.notes.filter((n) => n.id !== noteId),
+      }))
     },
-    [],
+    [updateBoard],
   )
 
   // Begin the crumple + toss flow for a note.
@@ -127,41 +113,6 @@ export default function App() {
     setOpenNote(null)
     setTossing({ boardId, note, origin })
   }, [])
-
-  const openSubBoard = useCallback(
-    (boardId, noteId) => {
-      setData((prev) => {
-        const board = prev.boards[boardId]
-        const note = board?.notes.find((n) => n.id === noteId)
-        if (!note) return prev
-        if (note.subBoardId && prev.boards[note.subBoardId]) return prev
-        const sub = makeBoard(note.text?.trim() || 'Sub-board')
-        return {
-          ...prev,
-          boards: {
-            ...prev.boards,
-            [sub.id]: sub,
-            [boardId]: {
-              ...board,
-              notes: board.notes.map((n) =>
-                n.id === noteId ? { ...n, subBoardId: sub.id } : n,
-              ),
-            },
-          },
-        }
-      })
-      // Navigate after state settles.
-      setData((prev) => {
-        const note = prev.boards[boardId]?.notes.find((n) => n.id === noteId)
-        if (note?.subBoardId) {
-          setNav((s) => [...s, note.subBoardId])
-          setOpenNote(null)
-        }
-        return prev
-      })
-    },
-    [],
-  )
 
   // ----- section helpers ----------------------------------------------------
 
@@ -281,7 +232,6 @@ export default function App() {
 
       <Board
         board={currentBoard}
-        boards={data.boards}
         onAddNote={addNote}
         onSetPosition={setPosition}
         onRaiseNote={raiseNote}
@@ -293,7 +243,6 @@ export default function App() {
         onSetColor={(noteId, color) =>
           patchNote(currentBoardId, noteId, { color })
         }
-        onOpenSubBoard={(noteId) => openSubBoard(currentBoardId, noteId)}
         onToss={(note, origin) => startToss(currentBoardId, note, origin)}
       />
 
@@ -302,20 +251,15 @@ export default function App() {
       {modalNote && (
         <NoteModal
           note={modalNote}
-          subTaskCount={
-            modalNote.subBoardId
-              ? data.boards[modalNote.subBoardId]?.notes.length || 0
-              : 0
-          }
           onClose={() => setOpenNote(null)}
           onEditText={(text) =>
             patchNote(openNote.boardId, openNote.noteId, { text })
           }
+          onEditDetails={(details) =>
+            patchNote(openNote.boardId, openNote.noteId, { details })
+          }
           onSetColor={(color) =>
             patchNote(openNote.boardId, openNote.noteId, { color })
-          }
-          onOpenSubBoard={() =>
-            openSubBoard(openNote.boardId, openNote.noteId)
           }
           onToss={(origin) =>
             startToss(openNote.boardId, modalNote, origin)

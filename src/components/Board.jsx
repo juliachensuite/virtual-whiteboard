@@ -63,7 +63,6 @@ function posToPlacement(left, top, zones, tray) {
 
 export default function Board({
   board,
-  boards,
   onAddNote,
   onSetPosition,
   onRaiseNote,
@@ -71,7 +70,6 @@ export default function Board({
   onDeleteSection,
   onOpenNote,
   onSetColor,
-  onOpenSubBoard,
   onToss,
 }) {
   const scrollRef = useRef(null)
@@ -189,12 +187,8 @@ export default function Board({
         left={isDragging ? drag.left : base.left}
         top={isDragging ? drag.top : base.top}
         dragging={isDragging}
-        subTaskCount={
-          note.subBoardId ? boards[note.subBoardId]?.notes.length || 0 : 0
-        }
         onBeginDrag={(e) => beginDrag(note, e)}
         onSetColor={(color) => onSetColor(note.id, color)}
-        onOpenSubBoard={() => onOpenSubBoard(note.id)}
         onToss={(origin) => onToss(note, origin)}
       />
     )

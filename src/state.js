@@ -7,13 +7,14 @@
 //       [boardId]: {
 //         id, title,
 //         sections: [{ id, name }],
-//         notes:    [{ id, text, color, sectionId, subBoardId|null }]
+//         notes:    [{ id, text, color, sectionId, details }]
 //       }
 //     }
 //   }
 //
-// A note may own a sub-board (subBoardId). Sub-boards live in the same flat
-// `boards` map, so nesting can go arbitrarily deep without recursive state.
+// `text` is what shows on the face of the post-it. `details` is a longer,
+// free-form notes area that's only visible while the note is open — hidden
+// the moment the post-it is closed.
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = 'sticky-whiteboard:v1'
@@ -60,7 +61,7 @@ export function makeNote(sectionId, overrides = {}) {
     text: '',
     color: 'yellow',
     sectionId,
-    subBoardId: null,
+    details: '', // longer notes, hidden until the note is opened
     tray: false, // true while resting in the bottom writing tray (unfiled)
     nx: 0.5,
     ny: 0.4,
@@ -83,7 +84,7 @@ export function defaultData() {
   root.notes = [
     makeNote(inProgress.id, { text: 'Double-click me to edit.', color: 'blue', nx: 0.12, ny: 0.1, tilt: -2 }),
     makeNote(inProgress.id, { text: 'Drag me anywhere — drop me in another zone to refile.', color: 'green', nx: 0.45, ny: 0.45, tilt: 1.5 }),
-    makeNote(waiting.id, { text: 'Tap the ⤢ corner to open a sub-board of tasks.', color: 'orange', nx: 0.3, ny: 0.25, tilt: -1.5 }),
+    makeNote(waiting.id, { text: 'Open me to jot longer notes — they stay hidden on the board.', color: 'orange', details: 'These details only show while the note is open. Close it and the post-it goes back to just its headline.', nx: 0.3, ny: 0.25, tilt: -1.5 }),
     makeNote(inProgress.id, { text: 'New notes start down here — write me, then drag me up ↑', color: 'yellow', tray: true, nx: 0.06, ny: 0.45, tilt: -1.5 }),
   ]
   return { rootBoardId: root.id, boards: { [root.id]: root } }
@@ -97,8 +98,9 @@ function normalizeNote(note) {
   return {
     text: '',
     color: 'yellow',
-    subBoardId: null,
+    details: '',
     ...note,
+    details: typeof note.details === 'string' ? note.details : '',
     tray: typeof note.tray === 'boolean' ? note.tray : false,
     nx: Number.isFinite(note.nx) ? note.nx : s.nx,
     ny: Number.isFinite(note.ny) ? note.ny : s.ny,
@@ -136,19 +138,3 @@ export function saveData(data) {
   }
 }
 
-// Collect a board id and every board nested beneath it (depth-first).
-export function collectBoardIds(boards, boardId, acc = []) {
-  const board = boards[boardId]
-  if (!board) return acc
-  acc.push(boardId)
-  for (const note of board.notes) {
-    if (note.subBoardId) collectBoardIds(boards, note.subBoardId, acc)
-  }
-  return acc
-}
-
-export function countTasks(boards, boardId) {
-  const board = boards[boardId]
-  if (!board) return 0
-  return board.notes.length
-}

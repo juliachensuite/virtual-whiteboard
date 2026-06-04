@@ -3,14 +3,14 @@ import { URGENCY_COLORS, colorFor } from '../state.js'
 
 export default function NoteModal({
   note,
-  subTaskCount,
   onClose,
   onEditText,
+  onEditDetails,
   onSetColor,
-  onOpenSubBoard,
   onToss,
 }) {
   const [draft, setDraft] = useState(note.text)
+  const [details, setDetails] = useState(note.details || '')
   const textRef = useRef(null)
   const color = colorFor(note.color)
 
@@ -26,6 +26,7 @@ export default function NoteModal({
 
   const commit = () => {
     if (draft !== note.text) onEditText(draft)
+    if (details !== (note.details || '')) onEditDetails(details)
   }
 
   return (
@@ -63,12 +64,18 @@ export default function NoteModal({
           </div>
         </div>
 
+        <div className="modal-row modal-row-stack">
+          <span className="modal-label">Notes</span>
+          <textarea
+            className="modal-details"
+            value={details}
+            onChange={(e) => setDetails(e.target.value)}
+            onBlur={commit}
+            placeholder="Longer notes, details, links… (hidden when the note is closed)"
+          />
+        </div>
+
         <div className="modal-actions">
-          <button className="btn btn-primary" onClick={onOpenSubBoard}>
-            {subTaskCount > 0
-              ? `Open sub-board (${subTaskCount})`
-              : 'Open sub-board'}
-          </button>
           <button
             className="btn btn-danger"
             onClick={() => {
@@ -87,7 +94,7 @@ export default function NoteModal({
         </div>
 
         <p className="modal-hint">
-          Tip: drag notes between sections right on the board.
+          Tip: the headline shows on the post-it; notes stay hidden until you open it.
         </p>
       </div>
     </div>
