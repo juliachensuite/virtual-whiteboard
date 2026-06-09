@@ -32,6 +32,15 @@ export function colorFor(id) {
   return URGENCY_COLORS.find((c) => c.id === id) || URGENCY_COLORS[0]
 }
 
+// Pick a random color id, so a fresh note lands on a varied color instead of
+// always yellow. Purely cosmetic — the picker still lets you change it.
+export function randomColorId() {
+  const r = typeof crypto !== 'undefined' && crypto.getRandomValues
+    ? crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000
+    : Math.random()
+  return URGENCY_COLORS[Math.floor(r * URGENCY_COLORS.length)].id
+}
+
 export function uid(prefix = 'id') {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return `${prefix}_${crypto.randomUUID().slice(0, 8)}`
@@ -59,7 +68,7 @@ export function makeNote(sectionId, overrides = {}) {
   return {
     id: uid('note'),
     text: '',
-    color: 'yellow',
+    color: randomColorId(),
     sectionId,
     details: '', // longer notes, hidden until the note is opened
     tray: false, // true while resting in the bottom writing tray (unfiled)
