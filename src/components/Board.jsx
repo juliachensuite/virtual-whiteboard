@@ -11,10 +11,30 @@ const HEADER_H = 46
 const PAD = 16
 const MIN_ZONE_W = 260
 const TRAY_H = 196
+const ROW_LABEL_H = 22 // label band at the top of each split row half
 
 const clamp01 = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.4)
 
-// A note's absolute board pixels, given its region rect.
+// The usable placement rect for a note inside its zone — the whole zone body,
+// or just the top/bottom half when the zone is split. Header and (for split
+// rows) the row-label band are already excluded.
+function regionFor(note, zone) {
+  const contentTop = zone.top + HEADER_H
+  const contentH = zone.h - HEADER_H
+  if (zone.split) {
+    const half = contentH / 2
+    const isBottom = note.row === 'bottom'
+    return {
+      left: zone.left,
+      top: (isBottom ? contentTop + half : contentTop) + ROW_LABEL_H,
+      w: zone.w,
+      h: half - ROW_LABEL_H,
+    }
+  }
+  return { left: zone.left, top: contentTop, w: zone.w, h: contentH }
+}
+
+// A note's absolute board pixels, given its zone (or the tray).
 function notePos(note, zone, tray) {
   if (note.tray) {
     const usableW = Math.max(tray.w - 2 * PAD - NOTE_W, 1)
@@ -24,16 +44,17 @@ function notePos(note, zone, tray) {
       top: tray.top + PAD + clamp01(note.ny) * usableH,
     }
   }
-  const usableW = Math.max(zone.w - 2 * PAD - NOTE_W, 1)
-  const usableH = Math.max(zone.h - HEADER_H - 2 * PAD - NOTE_H, 1)
+  const region = regionFor(note, zone)
+  const usableW = Math.max(region.w - 2 * PAD - NOTE_W, 1)
+  const usableH = Math.max(region.h - 2 * PAD - NOTE_H, 1)
   return {
-    left: zone.left + PAD + clamp01(note.nx) * usableW,
-    top: zone.top + HEADER_H + PAD + clamp01(note.ny) * usableH,
+    left: region.left + PAD + clamp01(note.nx) * usableW,
+    top: region.top + PAD + clamp01(note.ny) * usableH,
   }
 }
 
 // Given an absolute note-left/top, decide where it landed: down in the tray,
-// or up in one of the zones (picked by horizontal band).
+// or up in one of the zones (picked by horizontal band, then top/bottom row).
 function posToPlacement(left, top, zones, tray) {
   const cy = top + NOTE_H / 2
   if (cy >= tray.top) {
@@ -51,32 +72,46 @@ function posToPlacement(left, top, zones, tray) {
     if (cx >= z.left && cx < z.left + z.w) { target = z; break }
     if (cx >= z.left + z.w) target = z
   }
-  const usableW = Math.max(target.w - 2 * PAD - NOTE_W, 1)
-  const usableH = Math.max(target.h - HEADER_H - 2 * PAD - NOTE_H, 1)
+  // Which half, when the zone is split — by the note's vertical center.
+  let row = 'top'
+  if (target.split) {
+    const half = (target.h - HEADER_H) / 2
+    row = cy >= target.top + HEADER_H + half ? 'bottom' : 'top'
+  }
+  const region = regionFor({ row }, target)
+  const usableW = Math.max(region.w - 2 * PAD - NOTE_W, 1)
+  const usableH = Math.max(region.h - 2 * PAD - NOTE_H, 1)
   return {
     tray: false,
     sectionId: target.id,
-    nx: clamp01((left - target.left - PAD) / usableW),
-    ny: clamp01((top - target.top - HEADER_H - PAD) / usableH),
+    row,
+    nx: clamp01((left - region.left - PAD) / usableW),
+    ny: clamp01((top - region.top - PAD) / usableH),
   }
 }
 
 export default function Board({
   board,
+  disposalMode,
   onAddNote,
   onSetPosition,
   onRaiseNote,
   onRenameSection,
   onDeleteSection,
+  onSetWeights,
+  onToggleSplit,
+  onSetRowLabel,
   onOpenNote,
   onSetColor,
-  onToss,
+  onDispose,
 }) {
   const scrollRef = useRef(null)
   const boardRef = useRef(null)
   const [size, setSize] = useState({ w: 1000, h: 600 })
   const [drag, setDrag] = useState(null) // { id, left, top } while dragging
   const dragInfo = useRef(null)
+  const [dividerDrag, setDividerDrag] = useState(null) // index being dragged
+  const dividerInfo = useRef(null)
 
   const n = board.sections.length
   const firstSectionId = board.sections[0]?.id
@@ -91,23 +126,39 @@ export default function Board({
     return () => ro.disconnect()
   }, [])
 
+  // Zone widths come from section weights (normalized by their sum), so the
+  // proportions hold at any board width.
+  const weights = board.sections.map((s) => (s.weight > 0 ? s.weight : 1))
+  const totalWeight = weights.reduce((a, b) => a + b, 0) || 1
   const boardW = Math.max(size.w, n * MIN_ZONE_W)
   const boardH = size.h
   const zoneH = boardH - TRAY_H
-  const zoneW = boardW / n
 
-  const zones = board.sections.map((s, i) => ({
-    id: s.id,
-    name: s.name,
-    left: i * zoneW,
-    top: 0,
-    w: zoneW,
-    h: zoneH,
-  }))
+  let acc = 0
+  const zones = board.sections.map((s, i) => {
+    const w = (boardW * weights[i]) / totalWeight
+    const z = {
+      id: s.id,
+      name: s.name,
+      split: s.split,
+      topLabel: s.topLabel,
+      bottomLabel: s.bottomLabel,
+      left: acc,
+      top: 0,
+      w,
+      h: zoneH,
+    }
+    acc += w
+    return z
+  })
   const zoneById = Object.fromEntries(zones.map((z) => [z.id, z]))
   const tray = { left: 0, top: zoneH, w: boardW, h: TRAY_H }
 
-  // ----- drag handling ------------------------------------------------------
+  // Notes shown on the board are every live note except the ones impaled on
+  // the spike (those render on the spike in the corner instead).
+  const boardNotes = board.notes.filter((nt) => !nt.spiked)
+
+  // ----- note drag handling -------------------------------------------------
   const beginDrag = (note, e) => {
     const boardRect = boardRef.current.getBoundingClientRect()
     const zone = zoneById[note.sectionId] || zones[0]
@@ -159,6 +210,48 @@ export default function Board({
     }
   }, [drag, zones, tray, onSetPosition, onOpenNote])
 
+  // ----- divider drag (resize adjacent zones) -------------------------------
+  const beginDividerDrag = (i, e) => {
+    e.stopPropagation()
+    e.preventDefault()
+    dividerInfo.current = {
+      i,
+      startX: e.clientX,
+      leftW: zones[i].w,
+      rightW: zones[i + 1].w,
+      // Weight stays in the pair so other zones are untouched.
+      pairWeight: weights[i] + weights[i + 1],
+      leftId: zones[i].id,
+      rightId: zones[i + 1].id,
+    }
+    setDividerDrag(i)
+  }
+
+  useEffect(() => {
+    if (dividerDrag == null) return
+    const onMove = (e) => {
+      const info = dividerInfo.current
+      if (!info) return
+      const combinedW = info.leftW + info.rightW
+      let newLeftW = info.leftW + (e.clientX - info.startX)
+      let newRightW = combinedW - newLeftW
+      if (newLeftW < MIN_ZONE_W) { newLeftW = MIN_ZONE_W; newRightW = combinedW - newLeftW }
+      if (newRightW < MIN_ZONE_W) { newRightW = MIN_ZONE_W; newLeftW = combinedW - newRightW }
+      const wl = info.pairWeight * (newLeftW / combinedW)
+      onSetWeights(info.leftId, wl, info.rightId, info.pairWeight - wl)
+    }
+    const onUp = () => {
+      dividerInfo.current = null
+      setDividerDrag(null)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [dividerDrag, onSetWeights])
+
   // Double-click inside the tray → new note right there. (The tray is the
   // only place notes are created.)
   const onBoardDoubleClick = (e) => {
@@ -184,12 +277,13 @@ export default function Board({
       <Note
         key={note.id}
         note={note}
+        disposalMode={disposalMode}
         left={isDragging ? drag.left : base.left}
         top={isDragging ? drag.top : base.top}
         dragging={isDragging}
         onBeginDrag={(e) => beginDrag(note, e)}
         onSetColor={(color) => onSetColor(note.id, color)}
-        onToss={(origin) => onToss(note, origin)}
+        onDispose={(origin) => onDispose(note, origin)}
       />
     )
   }
@@ -197,7 +291,7 @@ export default function Board({
   return (
     <main className="whiteboard" ref={scrollRef}>
       <div
-        className="board-surface"
+        className={`board-surface${dividerDrag != null ? ' resizing' : ''}`}
         ref={boardRef}
         style={{ width: boardW, height: boardH }}
         onDoubleClick={onBoardDoubleClick}
@@ -206,7 +300,7 @@ export default function Board({
         {zones.map((z, i) => (
           <div
             key={z.id}
-            className={`zone${i % 2 ? ' zone-alt' : ''}`}
+            className={`zone${i % 2 ? ' zone-alt' : ''}${z.split ? ' zone-split' : ''}`}
             style={{ left: z.left, top: z.top, width: z.w, height: z.h }}
           >
             <div className="zone-head">
@@ -217,8 +311,15 @@ export default function Board({
                 aria-label="Zone name"
               />
               <span className="zone-count">
-                {board.notes.filter((nt) => !nt.tray && nt.sectionId === z.id).length}
+                {boardNotes.filter((nt) => !nt.tray && nt.sectionId === z.id).length}
               </span>
+              <button
+                className={`zone-split-btn${z.split ? ' on' : ''}`}
+                title={z.split ? 'Merge into one zone' : 'Split into top/bottom rows'}
+                onClick={() => onToggleSplit(z.id)}
+              >
+                ⬓
+              </button>
               {n > 1 && (
                 <button
                   className="zone-del"
@@ -229,7 +330,41 @@ export default function Board({
                 </button>
               )}
             </div>
+
+            {z.split && (
+              <>
+                <input
+                  className="row-label row-label-top"
+                  style={{ top: HEADER_H }}
+                  value={z.topLabel}
+                  onChange={(e) => onSetRowLabel(z.id, 'top', e.target.value)}
+                  aria-label="Top row label"
+                />
+                <div
+                  className="row-divider"
+                  style={{ top: HEADER_H + (z.h - HEADER_H) / 2 }}
+                />
+                <input
+                  className="row-label row-label-bottom"
+                  style={{ top: HEADER_H + (z.h - HEADER_H) / 2 }}
+                  value={z.bottomLabel}
+                  onChange={(e) => onSetRowLabel(z.id, 'bottom', e.target.value)}
+                  aria-label="Bottom row label"
+                />
+              </>
+            )}
           </div>
+        ))}
+
+        {/* resize handles on the seams between zones */}
+        {zones.slice(0, -1).map((z, i) => (
+          <div
+            key={`div-${z.id}`}
+            className={`zone-divider${dividerDrag === i ? ' dragging' : ''}`}
+            style={{ left: z.left + z.w, height: zoneH }}
+            onPointerDown={(e) => beginDividerDrag(i, e)}
+            title="Drag to resize zones"
+          />
         ))}
 
         {/* writing tray */}
@@ -245,7 +380,7 @@ export default function Board({
         </div>
 
         {/* notes layer (tray notes render above the tray, board notes in zones) */}
-        {board.notes.map(renderNote)}
+        {boardNotes.map(renderNote)}
       </div>
     </main>
   )
