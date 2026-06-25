@@ -3,12 +3,14 @@ import { URGENCY_COLORS, colorFor } from '../state.js'
 
 export default function NoteModal({
   note,
+  disposalMode,
   onClose,
   onEditText,
   onEditDetails,
   onSetColor,
-  onToss,
+  onDispose,
 }) {
+  const spikeMode = disposalMode === 'spike'
   const [draft, setDraft] = useState(note.text)
   const [details, setDetails] = useState(note.details || '')
   const textRef = useRef(null)
@@ -81,7 +83,7 @@ export default function NoteModal({
             onClick={() => {
               const el = document.querySelector('.modal-note')
               const rect = el?.getBoundingClientRect()
-              onToss({
+              onDispose({
                 x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
                 y: rect ? rect.top + rect.height / 2 : window.innerHeight / 2,
                 w: 220,
@@ -89,7 +91,7 @@ export default function NoteModal({
               })
             }}
           >
-            🗑 Crumple & toss
+            {spikeMode ? '📌 Stick on spike' : '🗑 Crumple & toss'}
           </button>
         </div>
 

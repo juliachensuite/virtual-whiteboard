@@ -3,20 +3,22 @@ import { URGENCY_COLORS, colorFor } from '../state.js'
 
 export default function Note({
   note,
+  disposalMode,
   left,
   top,
   dragging,
   onBeginDrag,
   onSetColor,
-  onToss,
+  onDispose,
 }) {
   const [showColors, setShowColors] = useState(false)
   const color = colorFor(note.color)
+  const spikeMode = disposalMode === 'spike'
 
-  const handleToss = (e) => {
+  const handleDispose = (e) => {
     e.stopPropagation()
     const rect = e.currentTarget.closest('.note')?.getBoundingClientRect()
-    onToss({
+    onDispose({
       x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
       y: rect ? rect.top + rect.height / 2 : window.innerHeight / 2,
       w: rect?.width || 176,
@@ -89,10 +91,10 @@ export default function Note({
 
         <button
           className="action-btn action-trash"
-          title="Crumple & toss"
-          onClick={handleToss}
+          title={spikeMode ? 'Stick on spike' : 'Crumple & toss'}
+          onClick={handleDispose}
         >
-          🗑
+          {spikeMode ? '📌' : '🗑'}
         </button>
       </div>
     </article>

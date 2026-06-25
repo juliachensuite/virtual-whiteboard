@@ -3,6 +3,8 @@ import {
   defaultData,
   loadData,
   makeNote,
+  makeSection,
+  normalizeImported,
   saveData,
   uid,
 } from './state.js'
@@ -10,6 +12,10 @@ import Board from './components/Board.jsx'
 import NoteModal from './components/NoteModal.jsx'
 import TrashBin from './components/TrashBin.jsx'
 import CrumpleToss from './components/CrumpleToss.jsx'
+import Spike from './components/Spike.jsx'
+import SpikeImpale from './components/SpikeImpale.jsx'
+import SpikeViewer from './components/SpikeViewer.jsx'
+import TrashDrawer from './components/TrashDrawer.jsx'
 
 export default function App() {
   const [data, setData] = useState(loadData)
@@ -17,8 +23,11 @@ export default function App() {
   const [nav, setNav] = useState([data.rootBoardId])
   // Note currently open in the detail modal: { boardId, noteId } | null
   const [openNote, setOpenNote] = useState(null)
-  // Note being crumpled & tossed: { boardId, note, origin: {x,y} } | null
-  const [tossing, setTossing] = useState(null)
+  // Note being disposed: { boardId, note, origin, mode: 'toss'|'spike' } | null
+  const [disposing, setDisposing] = useState(null)
+  // Which overlay panels are open.
+  const [trashOpen, setTrashOpen] = useState(false)
+  const [spikeOpen, setSpikeOpen] = useState(false)
   // Timestamp (ms) of the last JSON export, persisted on its own.
   const [lastExport, setLastExport] = useState(() => {
     const v = localStorage.getItem('sticky-whiteboard:lastExport')
@@ -26,6 +35,7 @@ export default function App() {
   })
 
   const binRef = useRef(null)
+  const spikeRef = useRef(null)
 
   useEffect(() => {
     saveData(data)
@@ -97,31 +107,171 @@ export default function App() {
     [currentBoardId, updateBoard],
   )
 
-  // Actually remove a note from the data.
-  const removeNote = useCallback(
-    (boardId, noteId) => {
-      updateBoard(boardId, (b) => ({
-        ...b,
-        notes: b.notes.filter((n) => n.id !== noteId),
-      }))
-    },
-    [updateBoard],
-  )
+  // ----- disposal: toss → trash, or spike --------------------------------
 
-  // Begin the crumple + toss flow for a note.
-  const startToss = useCallback((boardId, note, origin) => {
-    setOpenNote(null)
-    setTossing({ boardId, note, origin })
+  const disposalMode = data.disposalMode || 'toss'
+
+  const toggleDisposalMode = useCallback(() => {
+    setData((prev) => ({
+      ...prev,
+      disposalMode: prev.disposalMode === 'spike' ? 'toss' : 'spike',
+    }))
   }, [])
+
+  // Build a trash entry from a note that lives on some board, and drop it.
+  const trashEntry = (board, note) => ({
+    tid: uid('trash'),
+    note: { ...note, spiked: false },
+    boardId: board.id,
+    boardTitle: board.title,
+    deletedAt: Date.now(),
+  })
+
+  // Move a note off its board and into the recoverable trash.
+  const trashNote = useCallback((boardId, noteId) => {
+    setData((prev) => {
+      const board = prev.boards[boardId]
+      const note = board?.notes.find((n) => n.id === noteId)
+      if (!note) return prev
+      return {
+        ...prev,
+        boards: {
+          ...prev.boards,
+          [boardId]: { ...board, notes: board.notes.filter((n) => n.id !== noteId) },
+        },
+        trash: [trashEntry(board, note), ...(prev.trash || [])],
+      }
+    })
+  }, [])
+
+  // Flag a note as impaled on the spike (stays a live note).
+  const spikeNote = useCallback((boardId, noteId) => {
+    updateBoard(boardId, (b) => ({
+      ...b,
+      notes: b.notes.map((n) =>
+        n.id === noteId ? { ...n, spiked: true, spikedAt: Date.now() } : n,
+      ),
+    }))
+  }, [updateBoard])
+
+  // Pull a note back off the spike, onto its board.
+  const returnFromSpike = useCallback((boardId, noteId) => {
+    updateBoard(boardId, (b) => ({
+      ...b,
+      notes: b.notes.map((n) => (n.id === noteId ? { ...n, spiked: false } : n)),
+    }))
+  }, [updateBoard])
+
+  // Send a single spiked note to the trash.
+  const spikedToTrash = useCallback((boardId, noteId) => {
+    trashNote(boardId, noteId)
+  }, [trashNote])
+
+  // Clear the whole spike for a board → trash.
+  const clearSpike = useCallback((boardId) => {
+    setData((prev) => {
+      const board = prev.boards[boardId]
+      if (!board) return prev
+      const spiked = board.notes.filter((n) => n.spiked)
+      if (!spiked.length) return prev
+      const entries = spiked.map((note) => trashEntry(board, note))
+      return {
+        ...prev,
+        boards: {
+          ...prev.boards,
+          [boardId]: { ...board, notes: board.notes.filter((n) => !n.spiked) },
+        },
+        trash: [...entries, ...(prev.trash || [])],
+      }
+    })
+  }, [])
+
+  // ----- trash drawer actions ----------------------------------------------
+
+  const restoreFromTrash = useCallback((tid) => {
+    setData((prev) => {
+      const entry = (prev.trash || []).find((e) => e.tid === tid)
+      if (!entry) return prev
+      // Prefer the original board; fall back to root if it's gone.
+      let boardId = prev.boards[entry.boardId] ? entry.boardId : prev.rootBoardId
+      const board = prev.boards[boardId]
+      let note = { ...entry.note, spiked: false }
+      // If its zone vanished, drop it into the first zone of the target board.
+      if (!board.sections.find((s) => s.id === note.sectionId)) {
+        note = { ...note, sectionId: board.sections[0].id, row: 'top' }
+      }
+      return {
+        ...prev,
+        boards: {
+          ...prev.boards,
+          [boardId]: { ...board, notes: [...board.notes, note] },
+        },
+        trash: prev.trash.filter((e) => e.tid !== tid),
+      }
+    })
+  }, [])
+
+  const deleteForever = useCallback((tid) => {
+    setData((prev) => ({ ...prev, trash: (prev.trash || []).filter((e) => e.tid !== tid) }))
+  }, [])
+
+  const emptyTrash = useCallback(() => {
+    if (!confirm('Permanently delete everything in the trash?')) return
+    setData((prev) => ({ ...prev, trash: [] }))
+  }, [])
+
+  // Begin the disposal flow for a note, in whatever mode is active.
+  const startDispose = useCallback((boardId, note, origin) => {
+    setOpenNote(null)
+    setDisposing({ boardId, note, origin, mode: data.disposalMode || 'toss' })
+  }, [data.disposalMode])
 
   // ----- section helpers ----------------------------------------------------
 
   const addSection = useCallback(() => {
     updateBoard(currentBoardId, (b) => ({
       ...b,
-      sections: [...b.sections, { id: uid('sec'), name: 'New Section' }],
+      sections: [...b.sections, makeSection('New Section')],
     }))
   }, [currentBoardId, updateBoard])
+
+  // Resize two adjacent zones by setting their weights (others untouched).
+  const setWeights = useCallback(
+    (idA, wa, idB, wb) => {
+      updateBoard(currentBoardId, (b) => ({
+        ...b,
+        sections: b.sections.map((s) =>
+          s.id === idA ? { ...s, weight: wa } : s.id === idB ? { ...s, weight: wb } : s,
+        ),
+      }))
+    },
+    [currentBoardId, updateBoard],
+  )
+
+  const toggleSplit = useCallback(
+    (sectionId) => {
+      updateBoard(currentBoardId, (b) => ({
+        ...b,
+        sections: b.sections.map((s) =>
+          s.id === sectionId ? { ...s, split: !s.split } : s,
+        ),
+      }))
+    },
+    [currentBoardId, updateBoard],
+  )
+
+  const setRowLabel = useCallback(
+    (sectionId, which, value) => {
+      const key = which === 'top' ? 'topLabel' : 'bottomLabel'
+      updateBoard(currentBoardId, (b) => ({
+        ...b,
+        sections: b.sections.map((s) =>
+          s.id === sectionId ? { ...s, [key]: value } : s,
+        ),
+      }))
+    },
+    [currentBoardId, updateBoard],
+  )
 
   const renameSection = useCallback(
     (sectionId, name) => {
@@ -179,10 +329,7 @@ export default function App() {
     const reader = new FileReader()
     reader.onload = () => {
       try {
-        const parsed = JSON.parse(reader.result)
-        if (!parsed.boards || !parsed.rootBoardId) {
-          throw new Error('Not a whiteboard file')
-        }
+        const parsed = normalizeImported(JSON.parse(reader.result))
         setData(parsed)
         setNav([parsed.rootBoardId])
         setOpenNote(null)
@@ -213,6 +360,18 @@ export default function App() {
     ? data.boards[openNote.boardId]?.notes.find((n) => n.id === openNote.noteId)
     : null
 
+  // Notes impaled on the current board's spike, oldest at the bottom of the
+  // stack (sorted by when they were spiked).
+  const spikedNotes = useMemo(
+    () =>
+      (currentBoard?.notes || [])
+        .filter((n) => n.spiked)
+        .sort((a, b) => (a.spikedAt || 0) - (b.spikedAt || 0)),
+    [currentBoard],
+  )
+
+  const trash = data.trash || []
+
   if (!currentBoard) return null
 
   return (
@@ -224,6 +383,10 @@ export default function App() {
         onRenameBoard={renameBoard}
         isRoot={nav.length === 1}
         onAddSection={addSection}
+        disposalMode={disposalMode}
+        onToggleDisposalMode={toggleDisposalMode}
+        trashCount={trash.length}
+        onOpenTrash={() => setTrashOpen(true)}
         onExport={exportJson}
         onImport={importJson}
         onReset={resetBoard}
@@ -232,25 +395,43 @@ export default function App() {
 
       <Board
         board={currentBoard}
+        disposalMode={disposalMode}
         onAddNote={addNote}
         onSetPosition={setPosition}
         onRaiseNote={raiseNote}
         onRenameSection={renameSection}
         onDeleteSection={deleteSection}
+        onSetWeights={setWeights}
+        onToggleSplit={toggleSplit}
+        onSetRowLabel={setRowLabel}
         onOpenNote={(noteId) =>
           setOpenNote({ boardId: currentBoardId, noteId })
         }
         onSetColor={(noteId, color) =>
           patchNote(currentBoardId, noteId, { color })
         }
-        onToss={(note, origin) => startToss(currentBoardId, note, origin)}
+        onDispose={(note, origin) => startDispose(currentBoardId, note, origin)}
       />
 
-      <TrashBin ref={binRef} active={!!tossing} />
+      {/* Toss target — shown in toss mode (and while a toss is in flight). */}
+      {(disposalMode === 'toss' || disposing?.mode === 'toss') && (
+        <TrashBin ref={binRef} active={disposing?.mode === 'toss'} />
+      )}
+
+      {/* Spike — persistent whenever it holds notes, or while in spike mode. */}
+      {(disposalMode === 'spike' || spikedNotes.length > 0) && (
+        <Spike
+          ref={spikeRef}
+          notes={spikedNotes}
+          active={disposing?.mode === 'spike'}
+          onOpen={() => setSpikeOpen(true)}
+        />
+      )}
 
       {modalNote && (
         <NoteModal
           note={modalNote}
+          disposalMode={disposalMode}
           onClose={() => setOpenNote(null)}
           onEditText={(text) =>
             patchNote(openNote.boardId, openNote.noteId, { text })
@@ -261,22 +442,57 @@ export default function App() {
           onSetColor={(color) =>
             patchNote(openNote.boardId, openNote.noteId, { color })
           }
-          onToss={(origin) =>
-            startToss(openNote.boardId, modalNote, origin)
+          onDispose={(origin) =>
+            startDispose(openNote.boardId, modalNote, origin)
           }
         />
       )}
 
-      {tossing && (
+      {disposing?.mode === 'toss' && (
         <CrumpleToss
-          note={tossing.note}
-          origin={tossing.origin}
+          note={disposing.note}
+          origin={disposing.origin}
           binRef={binRef}
           onScored={() => {
-            removeNote(tossing.boardId, tossing.note.id)
-            setTossing(null)
+            trashNote(disposing.boardId, disposing.note.id)
+            setDisposing(null)
           }}
-          onCancel={() => setTossing(null)}
+          onCancel={() => setDisposing(null)}
+        />
+      )}
+
+      {disposing?.mode === 'spike' && (
+        <SpikeImpale
+          note={disposing.note}
+          origin={disposing.origin}
+          spikeRef={spikeRef}
+          onDone={() => {
+            spikeNote(disposing.boardId, disposing.note.id)
+            setDisposing(null)
+          }}
+        />
+      )}
+
+      {spikeOpen && (
+        <SpikeViewer
+          notes={spikedNotes}
+          onReturnToBoard={(noteId) => returnFromSpike(currentBoardId, noteId)}
+          onSendToTrash={(noteId) => spikedToTrash(currentBoardId, noteId)}
+          onClearAll={() => {
+            clearSpike(currentBoardId)
+            setSpikeOpen(false)
+          }}
+          onClose={() => setSpikeOpen(false)}
+        />
+      )}
+
+      {trashOpen && (
+        <TrashDrawer
+          trash={trash}
+          onRestore={restoreFromTrash}
+          onDeleteForever={deleteForever}
+          onEmpty={emptyTrash}
+          onClose={() => setTrashOpen(false)}
         />
       )}
     </div>
@@ -292,6 +508,10 @@ function Toolbar({
   onRenameBoard,
   isRoot,
   onAddSection,
+  disposalMode,
+  onToggleDisposalMode,
+  trashCount,
+  onOpenTrash,
   onExport,
   onImport,
   onReset,
@@ -327,6 +547,29 @@ function Toolbar({
       <div className="toolbar-right">
         <div className="toolbar-buttons">
           <button className="btn" onClick={onAddSection}>+ Section</button>
+          <div
+            className="dispose-toggle"
+            role="group"
+            aria-label="Disposal mode for finished notes"
+          >
+            <button
+              className={`dispose-opt${disposalMode === 'toss' ? ' on' : ''}`}
+              onClick={() => disposalMode !== 'toss' && onToggleDisposalMode()}
+              title="Finished notes crumple into the trash"
+            >
+              🗑 Toss
+            </button>
+            <button
+              className={`dispose-opt${disposalMode === 'spike' ? ' on' : ''}`}
+              onClick={() => disposalMode !== 'spike' && onToggleDisposalMode()}
+              title="Finished notes stick on the spike"
+            >
+              📌 Spike
+            </button>
+          </div>
+          <button className="btn" onClick={onOpenTrash}>
+            🗑 Trash{trashCount ? ` (${trashCount})` : ''}
+          </button>
           <button className="btn" onClick={onExport}>Export</button>
           <button className="btn" onClick={() => fileRef.current?.click()}>
             Import
