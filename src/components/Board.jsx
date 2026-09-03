@@ -1,12 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Note from './Note.jsx'
-import { scatter } from '../state.js'
+import { NOTE_SIZES, scatter, sizeOf } from '../state.js'
 
 // Layout constants (px). The board is one big surface: labeled zones fill the
 // top, and a writing tray runs along the bottom. Notes float at fractional
 // positions inside whichever region they currently live in.
-const NOTE_W = 176
-const NOTE_H = 168
 const HEADER_H = 46
 const PAD = 16
 const MIN_ZONE_W = 260
@@ -14,6 +12,9 @@ const TRAY_H = 196
 const ROW_LABEL_H = 22 // label band at the top of each split row half
 
 const clamp01 = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.4)
+
+// A note's footprint (px), from its S/M/L size.
+const dimsFor = (note) => NOTE_SIZES[sizeOf(note)]
 
 // The usable placement rect for a note inside its zone — the whole zone body,
 // or just the top/bottom half when the zone is split. Header and (for split
@@ -36,37 +37,40 @@ function regionFor(note, zone) {
 
 // A note's absolute board pixels, given its zone (or the tray).
 function notePos(note, zone, tray) {
+  const { w: nw, h: nh } = dimsFor(note)
   if (note.tray) {
-    const usableW = Math.max(tray.w - 2 * PAD - NOTE_W, 1)
-    const usableH = Math.max(tray.h - 2 * PAD - NOTE_H, 1)
+    const usableW = Math.max(tray.w - 2 * PAD - nw, 1)
+    const usableH = Math.max(tray.h - 2 * PAD - nh, 1)
     return {
       left: tray.left + PAD + clamp01(note.nx) * usableW,
       top: tray.top + PAD + clamp01(note.ny) * usableH,
     }
   }
   const region = regionFor(note, zone)
-  const usableW = Math.max(region.w - 2 * PAD - NOTE_W, 1)
-  const usableH = Math.max(region.h - 2 * PAD - NOTE_H, 1)
+  const usableW = Math.max(region.w - 2 * PAD - nw, 1)
+  const usableH = Math.max(region.h - 2 * PAD - nh, 1)
   return {
     left: region.left + PAD + clamp01(note.nx) * usableW,
     top: region.top + PAD + clamp01(note.ny) * usableH,
   }
 }
 
-// Given an absolute note-left/top, decide where it landed: down in the tray,
-// or up in one of the zones (picked by horizontal band, then top/bottom row).
-function posToPlacement(left, top, zones, tray) {
-  const cy = top + NOTE_H / 2
+// Given an absolute note-left/top and the note's footprint (dims), decide where
+// it landed: down in the tray, or up in one of the zones (picked by horizontal
+// band, then top/bottom row).
+function posToPlacement(left, top, zones, tray, dims) {
+  const { w: nw, h: nh } = dims
+  const cy = top + nh / 2
   if (cy >= tray.top) {
-    const usableW = Math.max(tray.w - 2 * PAD - NOTE_W, 1)
-    const usableH = Math.max(tray.h - 2 * PAD - NOTE_H, 1)
+    const usableW = Math.max(tray.w - 2 * PAD - nw, 1)
+    const usableH = Math.max(tray.h - 2 * PAD - nh, 1)
     return {
       tray: true,
       nx: clamp01((left - tray.left - PAD) / usableW),
       ny: clamp01((top - tray.top - PAD) / usableH),
     }
   }
-  const cx = left + NOTE_W / 2
+  const cx = left + nw / 2
   let target = zones[0]
   for (const z of zones) {
     if (cx >= z.left && cx < z.left + z.w) { target = z; break }
@@ -79,8 +83,8 @@ function posToPlacement(left, top, zones, tray) {
     row = cy >= target.top + HEADER_H + half ? 'bottom' : 'top'
   }
   const region = regionFor({ row }, target)
-  const usableW = Math.max(region.w - 2 * PAD - NOTE_W, 1)
-  const usableH = Math.max(region.h - 2 * PAD - NOTE_H, 1)
+  const usableW = Math.max(region.w - 2 * PAD - nw, 1)
+  const usableH = Math.max(region.h - 2 * PAD - nh, 1)
   return {
     tray: false,
     sectionId: target.id,
@@ -102,13 +106,16 @@ export default function Board({
   onToggleSplit,
   onSetRowLabel,
   onOpenNote,
+  onEditText,
   onSetColor,
+  onSetSize,
   onDispose,
 }) {
   const scrollRef = useRef(null)
   const boardRef = useRef(null)
   const [size, setSize] = useState({ w: 1000, h: 600 })
   const [drag, setDrag] = useState(null) // { id, left, top } while dragging
+  const [editingId, setEditingId] = useState(null) // note being edited in place
   const dragInfo = useRef(null)
   const [dividerDrag, setDividerDrag] = useState(null) // index being dragged
   const dividerInfo = useRef(null)
@@ -165,6 +172,7 @@ export default function Board({
     const { left, top } = notePos(note, zone, tray)
     dragInfo.current = {
       id: note.id,
+      dims: dimsFor(note),
       dx: e.clientX - (boardRect.left + left),
       dy: e.clientY - (boardRect.top + top),
       startX: e.clientX,
@@ -194,9 +202,9 @@ export default function Board({
       const info = dragInfo.current
       if (info && drag) {
         if (info.moved) {
-          onSetPosition(info.id, posToPlacement(drag.left, drag.top, zones, tray))
+          onSetPosition(info.id, posToPlacement(drag.left, drag.top, zones, tray, info.dims))
         } else {
-          onOpenNote(info.id) // a tap opens the note
+          setEditingId(info.id) // a tap edits the note text in place
         }
       }
       dragInfo.current = null
@@ -257,9 +265,11 @@ export default function Board({
   const onBoardDoubleClick = (e) => {
     if (e.target.closest('.note')) return
     const boardRect = boardRef.current.getBoundingClientRect()
-    const left = e.clientX - boardRect.left - NOTE_W / 2
-    const top = e.clientY - boardRect.top - NOTE_H / 2
-    const p = posToPlacement(left, top, zones, tray)
+    // New notes are born medium, so center and place against the M footprint.
+    const dims = NOTE_SIZES.M
+    const left = e.clientX - boardRect.left - dims.w / 2
+    const top = e.clientY - boardRect.top - dims.h / 2
+    const p = posToPlacement(left, top, zones, tray, dims)
     if (!p.tray) return // ignore double-clicks up in the zones
     onAddNote(firstSectionId, { tray: true, nx: p.nx, ny: p.ny, ...tiltOnly() })
   }
@@ -281,8 +291,13 @@ export default function Board({
         left={isDragging ? drag.left : base.left}
         top={isDragging ? drag.top : base.top}
         dragging={isDragging}
+        editing={editingId === note.id}
         onBeginDrag={(e) => beginDrag(note, e)}
+        onEditText={(text) => onEditText(note.id, text)}
+        onExitEdit={() => setEditingId((id) => (id === note.id ? null : id))}
+        onOpen={() => onOpenNote(note.id)}
         onSetColor={(color) => onSetColor(note.id, color)}
+        onCycleSize={() => onSetSize(note.id)}
         onDispose={(origin) => onDispose(note, origin)}
       />
     )
