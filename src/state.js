@@ -34,26 +34,49 @@ const STORAGE_KEY = 'sticky-whiteboard:v1'
 // Show a "trash is getting big" nudge once it holds more than this many notes.
 export const TRASH_WARN = 50
 
-export const URGENCY_COLORS = [
-  { id: 'yellow', label: 'None',   note: '#fef08a', edge: '#eddc5b' },
-  { id: 'green',  label: 'Low',    note: '#bbf7d0', edge: '#8fe3ab' },
-  { id: 'blue',   label: 'Normal', note: '#bae6fd', edge: '#8ad2f5' },
-  { id: 'orange', label: 'High',   note: '#fed7aa', edge: '#f7bd83' },
-  { id: 'pink',   label: 'Urgent', note: '#fbcfe8', edge: '#f3aad4' },
-  { id: 'red',    label: 'Now',    note: '#fecaca', edge: '#f59a9a' },
+// The three discrete post-it footprints (px). This is the single source of
+// truth: the board's placement math and the note's own width/height both read
+// from here, so a note's real size drives how many fit in a zone. Base font
+// scales with the box in CSS (see .note.size-*); auto-shrink then handles any
+// note that's still too long for its box.
+export const NOTE_SIZES = {
+  S: { w: 108, h: 104 },
+  M: { w: 140, h: 134 },
+  L: { w: 176, h: 168 },
+}
+
+// Cycle order for the on-note size button: S → M → L → S.
+export const NEXT_SIZE = { S: 'M', M: 'L', L: 'S' }
+
+export function sizeOf(note) {
+  return NOTE_SIZES[note?.size] ? note.size : 'L'
+}
+
+// Note colors, keyed by id. The label is just the human color name — these used
+// to double as urgency levels but are now purely cosmetic.
+export const NOTE_COLORS = [
+  { id: 'yellow', note: '#fef08a', edge: '#eddc5b' },
+  { id: 'green',  note: '#bbf7d0', edge: '#8fe3ab' },
+  { id: 'blue',   note: '#bae6fd', edge: '#8ad2f5' },
+  { id: 'orange', note: '#fed7aa', edge: '#f7bd83' },
+  { id: 'pink',   note: '#fbcfe8', edge: '#f3aad4' },
+  { id: 'red',    note: '#fecaca', edge: '#f59a9a' },
 ]
 
 export function colorFor(id) {
-  return URGENCY_COLORS.find((c) => c.id === id) || URGENCY_COLORS[0]
+  return NOTE_COLORS.find((c) => c.id === id) || NOTE_COLORS[0]
 }
 
 // Pick a random color id, so a fresh note lands on a varied color instead of
-// always yellow. Purely cosmetic — the picker still lets you change it.
-export function randomColorId() {
+// always yellow. Pass the current color to `exclude` so a "randomize" click
+// always visibly changes something.
+export function randomColorId(exclude) {
+  const pool = exclude ? NOTE_COLORS.filter((c) => c.id !== exclude) : NOTE_COLORS
+  const list = pool.length ? pool : NOTE_COLORS
   const r = typeof crypto !== 'undefined' && crypto.getRandomValues
     ? crypto.getRandomValues(new Uint32Array(1))[0] / 0x100000000
     : Math.random()
-  return URGENCY_COLORS[Math.floor(r * URGENCY_COLORS.length)].id
+  return list[Math.floor(r * list.length)].id
 }
 
 export function uid(prefix = 'id') {
@@ -98,6 +121,7 @@ export function makeNote(sectionId, overrides = {}) {
     id: uid('note'),
     text: '',
     color: randomColorId(),
+    size: 'M', // S | M | L footprint; new notes start medium to run denser
     sectionId,
     row: 'top', // which half when the zone is split; ignored otherwise
     details: '', // longer notes, hidden until the note is opened
@@ -147,6 +171,8 @@ function normalizeNote(note) {
     details: '',
     ...note,
     details: typeof note.details === 'string' ? note.details : '',
+    // Older notes predate sizing — keep them at their original full footprint.
+    size: NOTE_SIZES[note.size] ? note.size : 'L',
     tray: typeof note.tray === 'boolean' ? note.tray : false,
     row: note.row === 'bottom' ? 'bottom' : 'top',
     spiked: typeof note.spiked === 'boolean' ? note.spiked : false,

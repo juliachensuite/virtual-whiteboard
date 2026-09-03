@@ -225,11 +225,12 @@ body {
 /* ---------- sticky note ---------- */
 .note {
   position: absolute;
-  width: 176px;
+  /* width + height are set inline from the note's S/M/L footprint. */
+  display: flex;
+  flex-direction: column;
   background: var(--note-bg);
   border-radius: 3px 3px 5px 5px;
   padding: 16px 14px 30px;
-  min-height: 130px;
   cursor: grab;
   touch-action: none;
   transform: rotate(var(--tilt));
@@ -284,15 +285,34 @@ body {
   word-break: break-word;
   white-space: pre-wrap;
 }
+/* Base font scales with the box; auto-shrink takes over from here when a note
+   is still too long for its size. */
+.note.size-M .note-text, .note.size-M .note-text-edit { font-size: 17px; }
+.note.size-S .note-text, .note.size-S .note-text-edit { font-size: 14px; }
+/* Read view fills the face and hides overflow so auto-shrink has a fixed box
+   to fit into. */
+.note-text {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+/* When even the 8px floor overflows, ellipsis the last visible line. */
+.note-text-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
 .note-placeholder { color: rgba(0,0,0,0.32); }
 .note-text-edit {
+  flex: 1;
   width: 100%;
   border: none;
   background: transparent;
   resize: none;
-  min-height: 80px;
+  min-height: 0;
+  overflow: auto;
   outline: none;
 }
+.action-size { font-weight: 700; font-size: 12px; }
 
 .note-detail-badge {
   position: absolute;
@@ -312,6 +332,11 @@ body {
   transition: opacity 0.12s;
 }
 .note:hover .note-actions { opacity: 1; }
+.note-editing .note-actions { opacity: 1; }
+.note-editing { z-index: 40; cursor: default; }
+.action-fmt { font-size: 15px; font-family: Georgia, 'Times New Roman', serif; }
+.action-bold { font-weight: 800; }
+.action-italic { font-style: italic; font-weight: 600; }
 .action-btn {
   border: none;
   background: rgba(255,255,255,0.55);
@@ -348,6 +373,35 @@ body {
   cursor: pointer;
 }
 .swatch-on { box-shadow: 0 0 0 2px #2563eb; }
+/* Random-color bubble: a rainbow so it reads as "any color". */
+.swatch-random {
+  background:
+    conic-gradient(from 210deg,
+      #fef08a, #bbf7d0, #bae6fd, #fed7aa, #fbcfe8, #fecaca, #fef08a);
+}
+
+/* Segmented S / M / L size control in the note modal. */
+.size-toggle {
+  display: inline-flex;
+  border: 1px solid #d9dce1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+.size-opt {
+  border: none;
+  background: transparent;
+  color: #4b5563;
+  font-family: var(--ui);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.size-opt + .size-opt { border-left: 1px solid #e6e9ed; }
+.size-opt:hover { background: #f3f4f6; }
+.size-opt.on { background: #2563eb; color: #fff; }
 
 /* ---------- note modal ---------- */
 .modal-backdrop {

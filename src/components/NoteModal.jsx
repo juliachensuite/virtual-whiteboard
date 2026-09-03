@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { URGENCY_COLORS, colorFor } from '../state.js'
+import { NOTE_COLORS, colorFor, randomColorId, sizeOf } from '../state.js'
+
+const SIZES = [
+  { id: 'S', label: 'Small' },
+  { id: 'M', label: 'Medium' },
+  { id: 'L', label: 'Large' },
+]
+
+const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1)
 
 export default function NoteModal({
   note,
@@ -8,6 +16,7 @@ export default function NoteModal({
   onEditText,
   onEditDetails,
   onSetColor,
+  onSetSize,
   onDispose,
 }) {
   const spikeMode = disposalMode === 'spike'
@@ -15,9 +24,21 @@ export default function NoteModal({
   const [details, setDetails] = useState(note.details || '')
   const textRef = useRef(null)
   const color = colorFor(note.color)
+  const size = sizeOf(note)
+
+  const commit = () => {
+    if (draft !== note.text) onEditText(draft)
+    if (details !== (note.details || '')) onEditDetails(details)
+  }
+  // Escape closes from a one-time listener, so point it at the latest commit
+  // (not the render-0 closure) to save the current draft before closing.
+  const commitRef = useRef(commit)
+  commitRef.current = commit
 
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose()
+    const onKey = (e) => {
+      if (e.key === 'Escape') { commitRef.current(); onClose() }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
@@ -25,11 +46,6 @@ export default function NoteModal({
   useEffect(() => {
     textRef.current?.focus()
   }, [])
-
-  const commit = () => {
-    if (draft !== note.text) onEditText(draft)
-    if (details !== (note.details || '')) onEditDetails(details)
-  }
 
   return (
     <div className="modal-backdrop" onClick={() => { commit(); onClose() }}>
@@ -52,16 +68,37 @@ export default function NoteModal({
         />
 
         <div className="modal-row">
-          <span className="modal-label">Urgency</span>
+          <span className="modal-label">Color</span>
           <div className="modal-swatches">
-            {URGENCY_COLORS.map((c) => (
+            {NOTE_COLORS.map((c) => (
               <button
                 key={c.id}
                 className={`swatch${c.id === note.color ? ' swatch-on' : ''}`}
                 style={{ background: c.note }}
-                title={c.label}
+                title={capitalize(c.id)}
                 onClick={() => onSetColor(c.id)}
               />
+            ))}
+            <button
+              className="swatch swatch-random"
+              title="Random color"
+              onClick={() => onSetColor(randomColorId(note.color))}
+            />
+          </div>
+        </div>
+
+        <div className="modal-row">
+          <span className="modal-label">Size</span>
+          <div className="size-toggle" role="group" aria-label="Note size">
+            {SIZES.map((s) => (
+              <button
+                key={s.id}
+                className={`size-opt${size === s.id ? ' on' : ''}`}
+                title={s.label}
+                onClick={() => onSetSize(s.id)}
+              >
+                {s.id}
+              </button>
             ))}
           </div>
         </div>

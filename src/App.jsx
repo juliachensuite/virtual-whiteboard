@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  NEXT_SIZE,
   defaultData,
   loadData,
   makeNote,
   makeSection,
   normalizeImported,
   saveData,
+  sizeOf,
   uid,
 } from './state.js'
 import Board from './components/Board.jsx'
@@ -92,6 +94,19 @@ export default function App() {
       patchNote(currentBoardId, noteId, placed)
     },
     [currentBoardId, patchNote],
+  )
+
+  // Step a note through the S → M → L → S size cycle.
+  const cycleSize = useCallback(
+    (noteId) => {
+      updateBoard(currentBoardId, (b) => ({
+        ...b,
+        notes: b.notes.map((n) =>
+          n.id === noteId ? { ...n, size: NEXT_SIZE[sizeOf(n)] } : n,
+        ),
+      }))
+    },
+    [currentBoardId, updateBoard],
   )
 
   // Bring a note to the top of the stack (last in array renders on top).
@@ -407,9 +422,13 @@ export default function App() {
         onOpenNote={(noteId) =>
           setOpenNote({ boardId: currentBoardId, noteId })
         }
+        onEditText={(noteId, text) =>
+          patchNote(currentBoardId, noteId, { text })
+        }
         onSetColor={(noteId, color) =>
           patchNote(currentBoardId, noteId, { color })
         }
+        onSetSize={cycleSize}
         onDispose={(note, origin) => startDispose(currentBoardId, note, origin)}
       />
 
@@ -441,6 +460,9 @@ export default function App() {
           }
           onSetColor={(color) =>
             patchNote(openNote.boardId, openNote.noteId, { color })
+          }
+          onSetSize={(size) =>
+            patchNote(openNote.boardId, openNote.noteId, { size })
           }
           onDispose={(origin) =>
             startDispose(openNote.boardId, modalNote, origin)
